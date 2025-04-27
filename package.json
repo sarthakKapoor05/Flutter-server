@@ -1,0 +1,27 @@
+{
+  "name": "datavault",
+  "version": "1.0.0",
+  "description": "A new Flutter project.",
+  "main": "server.js",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sarthakKapoor05/datavault.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sarthakKapoor05/datavault/issues"
+  },
+  "homepage": "https://github.com/sarthakKapoor05/datavault#readme",
+  "dependencies": {
+    "ws": "^8.18.1"
+  }
+}
