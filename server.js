@@ -214,11 +214,9 @@ function broadcastConnectedDevices() {
   console.log(devicesList);
   
   clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify({
-        type: "connected_devices",
-        devices: devicesList
-      }));
-    }
+    client.send(JSON.stringify({
+      type: "connected_devices",
+      devices: devicesList
+    }));
   });
 }
