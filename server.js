@@ -95,6 +95,10 @@ wss.on("connection", function connection(ws) {
           // Send list of connected devices to the requesting client
           sendConnectedDevices(ws);
           return;
+        } else if (data.type === "ping") {
+          // Respond with pong to keep connection alive
+          ws.send(JSON.stringify({ type: "pong" }));
+          return;
         } else {
           // Regular text message
           console.log("Received:", data);
@@ -186,37 +190,27 @@ wss.on("connection", function connection(ws) {
 // Map to store pending file transfers: { ws: { targetId, metadata } }
 const pendingTransfers = new Map();
 
-// Function to collect connected device information
-function getConnectedDevices() {
-  const devices = [];
-  clients.forEach(client => {
-    devices.push({
-      id: client.id,
-      deviceName: client.deviceName
-    });
-  });
-  return devices;
-}
-
 // Send connected devices to a specific client
 function sendConnectedDevices(client) {
   if (client.readyState === WebSocket.OPEN) {
     client.send(JSON.stringify({
       type: "connected_devices",
-      devices: getConnectedDevices()
+      devices: getClientList()  // Use getClientList instead
     }));
   }
 }
 
 // Broadcast connected devices to all clients
 function broadcastConnectedDevices() {
-  const devicesList = getConnectedDevices();
+  const devicesList = getClientList();  // Use getClientList instead
   console.log(devicesList);
   
   clients.forEach(client => {
-    client.send(JSON.stringify({
-      type: "connected_devices",
-      devices: devicesList
-    }));
+    if (client.readyState === WebSocket.OPEN) {  // Add safety check
+      client.send(JSON.stringify({
+        type: "connected_devices",
+        devices: devicesList
+      }));
+    }
   });
 }
