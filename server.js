@@ -117,6 +117,13 @@ wss.on("connection", function connection(ws) {
         // --- NEW: Forward file binary data to target client if pending transfer ---
         if (pendingTransfers.has(ws)) {
           const { targetId, metadata } = pendingTransfers.get(ws);
+          
+          // First save the file to server
+          const filePath = path.join(uploadsDir, metadata.filename);
+          fs.writeFileSync(filePath, message);
+          console.log(`Saved file to server: ${metadata.filename} (${message.length} bytes)`);
+          
+          // Then forward to target client
           const target = Array.from(clients).find(c => c.deviceInfo && c.deviceInfo.id === targetId);
           if (target) {
             // Send metadata first
@@ -129,6 +136,23 @@ wss.on("connection", function connection(ws) {
             }));
             // Then send the file data
             target.send(message);
+            
+            // Acknowledge successful transfer to sender
+            ws.send(JSON.stringify({
+              type: "file_transferred",
+              filename: metadata.filename,
+              stored: true,
+              forwarded: true
+            }));
+          } else {
+            // Target client not found, but file still saved on server
+            ws.send(JSON.stringify({
+              type: "file_transferred",
+              filename: metadata.filename,
+              stored: true,
+              forwarded: false,
+              error: "Target client not found or disconnected"
+            }));
           }
           pendingTransfers.delete(ws);
           return;
