@@ -90,6 +90,37 @@ wss.on("connection", function connection(ws) {
               }));
             }
           });
+          
+          // Request file listing from the newly connected client
+          ws.send(JSON.stringify({
+            type: "request_initial_file_list"
+          }));
+          
+          return;
+        } else if (data.type === "initial_file_list_response") {
+          // Log only folders to console
+          console.log(`Received file list from ${ws.deviceName}:`);
+          const folders = (data.files || []).filter(file => file.isDirectory);
+          if (folders.length > 0) {
+            console.log("Folders:");
+            folders.forEach(folder => {
+              console.log(`- ${folder.name}`);
+            });
+          } else {
+            console.log("No folders found");
+          }
+          
+          // Broadcast the file listing to all other clients (keep sending all files)
+          clients.forEach(client => {
+            if (client !== ws && client.readyState === WebSocket.OPEN && client.deviceInfo) {
+              client.send(JSON.stringify({
+                type: "device_files_update",
+                deviceId: ws.deviceInfo.id,
+                deviceName: ws.deviceName || "Unknown Device",
+                files: data.files || []
+              }));
+            }
+          });
           return;
         } else if (data.type === "get_connected_devices") {
           // Send list of connected devices to the requesting client
@@ -98,6 +129,77 @@ wss.on("connection", function connection(ws) {
         } else if (data.type === "ping") {
           // Respond with pong to keep connection alive
           ws.send(JSON.stringify({ type: "pong" }));
+          return;
+        } else if (data.type === "list_files" && data.targetId) {
+          // Handle file list request
+          // Find the target client
+          const target = Array.from(clients).find(c => c.deviceInfo && c.deviceInfo.id === data.targetId);
+          if (target) {
+            console.log(`Forwarding file list request from ${ws.deviceInfo.id} to ${data.targetId}`);
+            
+            // Forward the request to the target client
+            target.send(JSON.stringify({
+              type: "request_file_list",
+              requesterId: ws.deviceInfo.id,
+              path: data.path || ''
+            }));
+          } else {
+            console.log(`Target client ${data.targetId} not found for file list request`);
+            ws.send(JSON.stringify({
+              type: "error",
+              message: "Target device not found or offline"
+            }));
+          }
+          return;
+        } else if (data.type === "file_list_response" && data.requesterId) {
+          // Handle file list response
+          // Find the requesting client
+          const requester = Array.from(clients).find(c => c.deviceInfo && c.deviceInfo.id === data.requesterId);
+          if (requester) {
+            // Forward the response to the requesting client
+            requester.send(JSON.stringify({
+              type: "file_list_response",
+              sourceId: ws.deviceInfo.id,
+              sourcePath: data.path || '',
+              sourceName: ws.deviceName || 'Unknown Device',
+              files: data.files || [],
+              requesterId: data.requesterId
+            }));
+          }
+          return;
+        } else if (data.type === "request_file_access" && data.targetId) {
+          // Find the target client
+          const target = Array.from(clients).find(c => c.deviceInfo && c.deviceInfo.id === data.targetId);
+          if (target) {
+            console.log(`${ws.deviceInfo.id} is requesting file access from ${data.targetId}`);
+            
+            // Forward the access request to target
+            target.send(JSON.stringify({
+              type: "file_access_request",
+              requesterId: ws.deviceInfo.id,
+              requesterName: ws.deviceName || "Unknown Device"
+            }));
+          } else {
+            ws.send(JSON.stringify({
+              type: "error",
+              message: "Target device not found or offline"
+            }));
+          }
+          return;
+        } else if (data.type === "file_access_response") {
+          // Handle permission response
+          const requester = Array.from(clients).find(c => c.deviceInfo && c.deviceInfo.id === data.requesterId);
+          if (requester) {
+            // Forward the response to the requesting client
+            requester.send(JSON.stringify({
+              type: "file_access_response",
+              granted: data.granted,
+              targetId: ws.deviceInfo.id,
+              targetName: ws.deviceName
+            }));
+            
+            console.log(`File access ${data.granted ? 'granted' : 'denied'} by ${ws.deviceInfo.id} to ${data.requesterId}`);
+          }
           return;
         } else {
           // Regular text message
