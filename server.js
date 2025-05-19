@@ -242,6 +242,27 @@ wss.on("connection", function connection(ws) {
             console.log(`File access ${data.granted ? 'granted' : 'denied'} by ${ws.deviceInfo.id} to ${data.requesterId}`);
           }
           return;
+        } else if (data.type === "request_directory_listing" && data.targetId && data.path !== undefined) {
+          // Forward the request to target device
+          const targetClient = clients.find(client => 
+            client.deviceInfo && client.deviceInfo.id === data.targetId
+          );
+          
+          if (targetClient && targetClient.readyState === WebSocket.OPEN) {
+            console.log(`Forwarding directory listing request: ${data.path} from ${ws.deviceName} to ${targetClient.deviceName}`);
+            
+            targetClient.send(JSON.stringify({
+              type: "directory_listing_request",
+              path: data.path,
+              requesterId: data.requesterId,
+            }));
+          } else {
+            ws.send(JSON.stringify({
+              type: "error",
+              message: "Target device not connected or unavailable"
+            }));
+          }
+          return;
         } else {
           // Regular text message
           console.log("Received:", data);
