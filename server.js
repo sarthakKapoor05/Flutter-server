@@ -193,20 +193,8 @@ wss.on("connection", function connection(ws) {
           }
           return;
         } else if (data.type === "file_list_response" && data.requesterId) {
-          // Handle file list response
-          // Find the requesting client
-          const requester = Array.from(clients).find(c => c.deviceInfo && c.deviceInfo.id === data.requesterId);
-          if (requester) {
-            // Forward the response to the requesting client
-            requester.send(JSON.stringify({
-              type: "file_list_response",
-              sourceId: ws.deviceInfo.id,
-              sourcePath: data.path || '',
-              sourceName: ws.deviceName || 'Unknown Device',
-              files: data.files || [],
-              requesterId: data.requesterId
-            }));
-          }
+          // Use the helper function to forward directory listing responses
+          handleDirectoryListingResponse(ws, data);
           return;
         } else if (data.type === "request_file_access" && data.targetId) {
           // Find the target client
@@ -430,4 +418,38 @@ function displayClientStorageStructure(deviceName, files) {
   }
   
   console.log(tree);
+}
+
+// Add this after the displayClientStorageStructure function
+
+function handleDirectoryListingResponse(ws, data) {
+  // Find the requesting client
+  const requester = Array.from(clients).find(c => 
+    c.deviceInfo && c.deviceInfo.id === data.requesterId
+  );
+  
+  if (requester && requester.readyState === WebSocket.OPEN) {
+    // Forward the directory content with source information
+    requester.send(JSON.stringify({
+      type: "file_list_response",
+      sourceId: ws.deviceInfo.id,
+      sourceName: ws.deviceName || 'Unknown Device',
+      path: data.path || '',
+      files: data.files || [],
+      error: data.error,
+      requesterId: data.requesterId
+    }));
+    
+    // Log the response
+    console.log(`Directory listing response from ${ws.deviceName} for path "${data.path || 'root'}"`);
+    if (data.files && data.files.length > 0) {
+      console.log(`  - ${data.files.filter(f => f.isDirectory).length} folders, ${data.files.filter(f => !f.isDirectory).length} files`);
+    } else if (data.error) {
+      console.log(`  - Error: ${data.error}`);
+    } else {
+      console.log('  - No files');
+    }
+  } else {
+    console.log(`Requester ${data.requesterId} not found or disconnected`);
+  }
 }
