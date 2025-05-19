@@ -98,17 +98,58 @@ wss.on("connection", function connection(ws) {
           
           return;
         } else if (data.type === "initial_file_list_response") {
-          // Log only folders to console
-          console.log(`Received file list from ${ws.deviceName}:`);
+          // Display the client's storage structure in a more visual way
+          displayClientStorageStructure(ws.deviceName, data.files || []);
+          
+          // Log client files to console in a nice format
+          console.log(`\n====== Files from ${ws.deviceName} ======`);
+          
           const folders = (data.files || []).filter(file => file.isDirectory);
+          const regularFiles = (data.files || []).filter(file => !file.isDirectory);
+          
+          // Display folders
           if (folders.length > 0) {
-            console.log("Folders:");
+            console.log("\n📁 FOLDERS:");
             folders.forEach(folder => {
-              console.log(`- ${folder.name}`);
+              console.log(`  - ${folder.name}`);
             });
           } else {
-            console.log("No folders found");
+            console.log("\n📁 FOLDERS: None");
           }
+          
+          // Display files with size and modification date
+          if (regularFiles.length > 0) {
+            console.log("\n📄 FILES:");
+            regularFiles.forEach(file => {
+              // Format size nicely
+              let sizeStr = "Unknown size";
+              if (file.size !== undefined) {
+                if (file.size < 1024) sizeStr = `${file.size} B`;
+                else if (file.size < 1024 * 1024) sizeStr = `${(file.size / 1024).toFixed(1)} KB`;
+                else if (file.size < 1024 * 1024 * 1024) sizeStr = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+                else sizeStr = `${(file.size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+              }
+              
+              // Format date if available
+              let dateStr = "";
+              if (file.modified) {
+                try {
+                  const date = new Date(file.modified);
+                  dateStr = date.toLocaleString();
+                } catch (e) {
+                  dateStr = "Unknown date";
+                }
+              }
+              
+              console.log(`  - ${file.name} (${sizeStr})${dateStr ? ' - ' + dateStr : ''}`);
+            });
+          } else {
+            console.log("\n📄 FILES: None");
+          }
+          
+          // Print total counts
+          console.log(`\n📊 SUMMARY: ${folders.length} folders, ${regularFiles.length} files`);
+          console.log("==============================\n");
           
           // Broadcast the file listing to all other clients (keep sending all files)
           clients.forEach(client => {
@@ -339,4 +380,33 @@ function broadcastConnectedDevices() {
       }));
     }
   });
+}
+
+// Add this function at the bottom of your server.js file
+function displayClientStorageStructure(deviceName, files) {
+  // Create an ASCII tree representation of the files
+  let tree = `\n📱 ${deviceName}'s Storage:\n`;
+  
+  // First add folders
+  const folders = files.filter(f => f.isDirectory).sort((a, b) => a.name.localeCompare(b.name));
+  
+  folders.forEach(folder => {
+    tree += `├── 📁 ${folder.name}\n`;
+  });
+  
+  // Then add files (limit to 15 to avoid cluttering the console)
+  const fileList = files.filter(f => !f.isDirectory).sort((a, b) => a.name.localeCompare(b.name));
+  const displayFiles = fileList.slice(0, 15);
+  
+  displayFiles.forEach((file, i) => {
+    const isLast = i === displayFiles.length - 1 && i === fileList.length - 1;
+    const prefix = isLast ? '└── ' : '├── ';
+    tree += `${prefix}📄 ${file.name}\n`;
+  });
+  
+  if (fileList.length > 15) {
+    tree += `└── ... ${fileList.length - 15} more files\n`;
+  }
+  
+  console.log(tree);
 }
