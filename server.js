@@ -62,11 +62,22 @@ wss.on("connection", function connection(ws) {
           // Find the target client
           const target = Array.from(clients).find(c => c.deviceInfo && c.deviceInfo.id === data.targetId);
           if (target) {
+            console.log(`File request from ${ws.deviceName}: ${data.filename}`);
+            
             // Ask the target client to send the file
             target.send(JSON.stringify({
               type: "request_file",
               filename: data.filename,
-              fromId: ws.deviceInfo.id
+              fromId: ws.deviceInfo.id,
+              requesterId: ws.deviceInfo.id
+            }));
+            
+            // Log the request
+            console.log(`Forwarding file request for "${data.filename}" from ${ws.deviceName} to ${target.deviceName}`);
+          } else {
+            ws.send(JSON.stringify({
+              type: "error",
+              message: "Target device not found or offline"
             }));
           }
           return;
@@ -452,4 +463,23 @@ function handleDirectoryListingResponse(ws, data) {
   } else {
     console.log(`Requester ${data.requesterId} not found or disconnected`);
   }
+}
+
+// Add this in the "file_metadata" handling section:
+
+if (data.type === "file_metadata") {
+  console.log(`📎 File metadata received: ${data.filename}`);
+  console.log(`   - Size: ${formatFileSize(data.size)}`);
+  console.log(`   - From: ${ws.deviceName}`);
+  console.log(`   - To: ${data.targetId ? "Client " + data.targetId : "All clients"}`);
+  
+  // ... rest of your existing file_metadata handling
+}
+
+// Add this helper function at the bottom of your file
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
