@@ -64,11 +64,12 @@ wss.on("connection", function connection(ws) {
           if (target) {
             console.log(`File request from ${ws.deviceName}: ${data.filename}`);
             
-            // Ask the target client to send the file
+            // Forward the request with all needed information
             target.send(JSON.stringify({
               type: "request_file",
               filename: data.filename,
               fromId: ws.deviceInfo.id,
+              requesterName: ws.deviceName || 'Unknown Device',
               requesterId: ws.deviceInfo.id
             }));
             
