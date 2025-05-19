@@ -2,7 +2,7 @@
 const WebSocket = require("ws");
 const fs = require("fs");
 const path = require("path");
-const { v4: uuidv4 } = require('uuid'); // You'll need to install this: npm install uuid
+const { v4: uuidv4 } = require("uuid"); // You'll need to install this: npm install uuid
 
 // Create a WebSocket server at port 8080
 const wss = new WebSocket.Server({ port: 8080 });
@@ -21,21 +21,21 @@ if (!fs.existsSync(uploadsDir)) {
 let clientIdCounter = 1;
 function getClientList() {
   return Array.from(clients)
-    .filter(ws => ws.deviceInfo)
-    .map(ws => ({
+    .filter((ws) => ws.deviceInfo)
+    .map((ws) => ({
       id: ws.deviceInfo.id,
-      name: ws.deviceInfo.deviceName
+      name: ws.deviceInfo.deviceName,
     }));
 }
 
 wss.on("connection", function connection(ws) {
   console.log("A new client connected!");
-  
+
   // Assign a unique ID to this client
   ws.id = uuidv4();
   ws.deviceName = "Unknown Device"; // Default name
   ws.deviceInfo = null; // Will be set on register_device
-  
+
   // Add the client to our set
   clients.add(ws);
 
@@ -46,10 +46,25 @@ wss.on("connection", function connection(ws) {
   ws.on("message", function incoming(message) {
     try {
       // Check if the message is a string or binary data
-      if (typeof message === "string" || message instanceof Buffer && message.toString().startsWith('{')) {
+      if (
+        typeof message === "string" ||
+        (message instanceof Buffer && message.toString().startsWith("{"))
+      ) {
         // Try to parse as JSON to check if it's a file metadata message
         const data = JSON.parse(message.toString());
-        
+
+        // Handle file metadata
+        if (data.type === "file_metadata" && data.targetId) {
+          console.log(`📎 File metadata received: ${data.filename}`);
+          console.log(`   - Size: ${formatFileSize(data.size)}`);
+          console.log(`   - From: ${ws.deviceName}`);
+          console.log(`   - To: ${data.targetId ? "Client " + data.targetId : "All clients"}`);
+          
+          // Store pending transfer info
+          pendingTransfers.set(ws, { targetId: data.targetId, metadata: data });
+          ws.send(JSON.stringify({ type: "ready_for_file" }));
+          return;
+        }
         // --- NEW: Handle sending file to another client ---
         if (data.type === "file_metadata" && data.targetId) {
           // Store pending transfer info
@@ -60,7 +75,9 @@ wss.on("connection", function connection(ws) {
         // --- NEW: Handle file received request ---
         if (data.type === "request_file" && data.targetId && data.filename) {
           // Find the target client
-          const target = Array.from(clients).find(c => c.deviceInfo && c.deviceInfo.id === data.targetId);
+          const target = Array.from(clients).find(
+            (c) => c.deviceInfo && c.deviceInfo.id === data.targetId
+          );
           if (target) {
             console.log(`File request from ${ws.deviceName}: ${data.filename}`);
             
@@ -86,62 +103,73 @@ wss.on("connection", function connection(ws) {
           // Register device name
           ws.deviceName = data.deviceName || `Device-${ws.id.substring(0, 6)}`;
           console.log(`Device registered: ${ws.deviceName}`);
-          
+
           // Assign a unique id to each client
           ws.deviceInfo = {
-            id: "client_" + (clientIdCounter++),
-            deviceName: data.deviceName || "Unknown"
+            id: "client_" + clientIdCounter++,
+            deviceName: data.deviceName || "Unknown",
           };
           // Send the updated list to all clients
           const clientList = getClientList();
-          clients.forEach(client => {
+          clients.forEach((client) => {
             if (client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({
-                type: "connected_devices",
-                devices: clientList
-              }));
+              client.send(
+                JSON.stringify({
+                  type: "connected_devices",
+                  devices: clientList,
+                })
+              );
             }
           });
-          
+
           // Request file listing from the newly connected client
-          ws.send(JSON.stringify({
-            type: "request_initial_file_list"
-          }));
-          
+          ws.send(
+            JSON.stringify({
+              type: "request_initial_file_list",
+            })
+          );
+
           return;
         } else if (data.type === "initial_file_list_response") {
           // Display the client's storage structure in a more visual way
           displayClientStorageStructure(ws.deviceName, data.files || []);
-          
+
           // Log client files to console in a nice format
           console.log(`\n====== Files from ${ws.deviceName} ======`);
-          
-          const folders = (data.files || []).filter(file => file.isDirectory);
-          const regularFiles = (data.files || []).filter(file => !file.isDirectory);
-          
+
+          const folders = (data.files || []).filter((file) => file.isDirectory);
+          const regularFiles = (data.files || []).filter(
+            (file) => !file.isDirectory
+          );
+
           // Display folders
           if (folders.length > 0) {
             console.log("\n📁 FOLDERS:");
-            folders.forEach(folder => {
+            folders.forEach((folder) => {
               console.log(`  - ${folder.name}`);
             });
           } else {
             console.log("\n📁 FOLDERS: None");
           }
-          
+
           // Display files with size and modification date
           if (regularFiles.length > 0) {
             console.log("\n📄 FILES:");
-            regularFiles.forEach(file => {
+            regularFiles.forEach((file) => {
               // Format size nicely
               let sizeStr = "Unknown size";
               if (file.size !== undefined) {
                 if (file.size < 1024) sizeStr = `${file.size} B`;
-                else if (file.size < 1024 * 1024) sizeStr = `${(file.size / 1024).toFixed(1)} KB`;
-                else if (file.size < 1024 * 1024 * 1024) sizeStr = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
-                else sizeStr = `${(file.size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+                else if (file.size < 1024 * 1024)
+                  sizeStr = `${(file.size / 1024).toFixed(1)} KB`;
+                else if (file.size < 1024 * 1024 * 1024)
+                  sizeStr = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+                else
+                  sizeStr = `${(file.size / (1024 * 1024 * 1024)).toFixed(
+                    1
+                  )} GB`;
               }
-              
+
               // Format date if available
               let dateStr = "";
               if (file.modified) {
@@ -152,26 +180,36 @@ wss.on("connection", function connection(ws) {
                   dateStr = "Unknown date";
                 }
               }
-              
-              console.log(`  - ${file.name} (${sizeStr})${dateStr ? ' - ' + dateStr : ''}`);
+
+              console.log(
+                `  - ${file.name} (${sizeStr})${dateStr ? " - " + dateStr : ""}`
+              );
             });
           } else {
             console.log("\n📄 FILES: None");
           }
-          
+
           // Print total counts
-          console.log(`\n📊 SUMMARY: ${folders.length} folders, ${regularFiles.length} files`);
+          console.log(
+            `\n📊 SUMMARY: ${folders.length} folders, ${regularFiles.length} files`
+          );
           console.log("==============================\n");
-          
+
           // Broadcast the file listing to all other clients (keep sending all files)
-          clients.forEach(client => {
-            if (client !== ws && client.readyState === WebSocket.OPEN && client.deviceInfo) {
-              client.send(JSON.stringify({
-                type: "device_files_update",
-                deviceId: ws.deviceInfo.id,
-                deviceName: ws.deviceName || "Unknown Device",
-                files: data.files || []
-              }));
+          clients.forEach((client) => {
+            if (
+              client !== ws &&
+              client.readyState === WebSocket.OPEN &&
+              client.deviceInfo
+            ) {
+              client.send(
+                JSON.stringify({
+                  type: "device_files_update",
+                  deviceId: ws.deviceInfo.id,
+                  deviceName: ws.deviceName || "Unknown Device",
+                  files: data.files || [],
+                })
+              );
             }
           });
           return;
@@ -186,22 +224,32 @@ wss.on("connection", function connection(ws) {
         } else if (data.type === "list_files" && data.targetId) {
           // Handle file list request
           // Find the target client
-          const target = Array.from(clients).find(c => c.deviceInfo && c.deviceInfo.id === data.targetId);
+          const target = Array.from(clients).find(
+            (c) => c.deviceInfo && c.deviceInfo.id === data.targetId
+          );
           if (target) {
-            console.log(`Forwarding file list request from ${ws.deviceInfo.id} to ${data.targetId}`);
-            
+            console.log(
+              `Forwarding file list request from ${ws.deviceInfo.id} to ${data.targetId}`
+            );
+
             // Forward the request to the target client
-            target.send(JSON.stringify({
-              type: "request_file_list",
-              requesterId: ws.deviceInfo.id,
-              path: data.path || ''
-            }));
+            target.send(
+              JSON.stringify({
+                type: "request_file_list",
+                requesterId: ws.deviceInfo.id,
+                path: data.path || "",
+              })
+            );
           } else {
-            console.log(`Target client ${data.targetId} not found for file list request`);
-            ws.send(JSON.stringify({
-              type: "error",
-              message: "Target device not found or offline"
-            }));
+            console.log(
+              `Target client ${data.targetId} not found for file list request`
+            );
+            ws.send(
+              JSON.stringify({
+                type: "error",
+                message: "Target device not found or offline",
+              })
+            );
           }
           return;
         } else if (data.type === "file_list_response" && data.requesterId) {
@@ -210,70 +258,107 @@ wss.on("connection", function connection(ws) {
           return;
         } else if (data.type === "request_file_access" && data.targetId) {
           // Find the target client
-          const target = Array.from(clients).find(c => c.deviceInfo && c.deviceInfo.id === data.targetId);
+          const target = Array.from(clients).find(
+            (c) => c.deviceInfo && c.deviceInfo.id === data.targetId
+          );
           if (target) {
-            console.log(`${ws.deviceInfo.id} is requesting file access from ${data.targetId}`);
-            
+            console.log(
+              `${ws.deviceInfo.id} is requesting file access from ${data.targetId}`
+            );
+
             // Forward the access request to target
-            target.send(JSON.stringify({
-              type: "file_access_request",
-              requesterId: ws.deviceInfo.id,
-              requesterName: ws.deviceName || "Unknown Device"
-            }));
+            target.send(
+              JSON.stringify({
+                type: "file_access_request",
+                requesterId: ws.deviceInfo.id,
+                requesterName: ws.deviceName || "Unknown Device",
+              })
+            );
           } else {
-            ws.send(JSON.stringify({
-              type: "error",
-              message: "Target device not found or offline"
-            }));
+            ws.send(
+              JSON.stringify({
+                type: "error",
+                message: "Target device not found or offline",
+              })
+            );
           }
           return;
         } else if (data.type === "file_access_response") {
           // Handle permission response
-          const requester = Array.from(clients).find(c => c.deviceInfo && c.deviceInfo.id === data.requesterId);
+          const requester = Array.from(clients).find(
+            (c) => c.deviceInfo && c.deviceInfo.id === data.requesterId
+          );
           if (requester) {
             // Forward the response to the requesting client
-            requester.send(JSON.stringify({
-              type: "file_access_response",
-              granted: data.granted,
-              targetId: ws.deviceInfo.id,
-              targetName: ws.deviceName
-            }));
-            
-            console.log(`File access ${data.granted ? 'granted' : 'denied'} by ${ws.deviceInfo.id} to ${data.requesterId}`);
+            requester.send(
+              JSON.stringify({
+                type: "file_access_response",
+                granted: data.granted,
+                targetId: ws.deviceInfo.id,
+                targetName: ws.deviceName,
+              })
+            );
+
+            console.log(
+              `File access ${data.granted ? "granted" : "denied"} by ${
+                ws.deviceInfo.id
+              } to ${data.requesterId}`
+            );
           }
           return;
-        } else if (data.type === "request_directory_listing" && data.targetId && data.path !== undefined) {
+        } else if (
+          data.type === "request_directory_listing" &&
+          data.targetId &&
+          data.path !== undefined
+        ) {
           // Forward the request to target device
-          const targetClient = clients.find(client => 
-            client.deviceInfo && client.deviceInfo.id === data.targetId
+          const targetClient = clients.find(
+            (client) =>
+              client.deviceInfo && client.deviceInfo.id === data.targetId
           );
-          
+
           if (targetClient && targetClient.readyState === WebSocket.OPEN) {
-            console.log(`Forwarding directory listing request: ${data.path} from ${ws.deviceName} to ${targetClient.deviceName}`);
-            
-            targetClient.send(JSON.stringify({
-              type: "directory_listing_request",
-              path: data.path,
-              requesterId: data.requesterId,
-            }));
+            console.log(
+              `Forwarding directory listing request: ${data.path} from ${ws.deviceName} to ${targetClient.deviceName}`
+            );
+
+            targetClient.send(
+              JSON.stringify({
+                type: "directory_listing_request",
+                path: data.path,
+                requesterId: data.requesterId,
+              })
+            );
           } else {
-            ws.send(JSON.stringify({
-              type: "error",
-              message: "Target device not connected or unavailable"
-            }));
+            ws.send(
+              JSON.stringify({
+                type: "error",
+                message: "Target device not connected or unavailable",
+              })
+            );
           }
           return;
         } else {
           // Regular text message
           console.log("Received:", data);
-          
+
           // Echo back the message to the sender
-          ws.send(JSON.stringify({ type: "message", text: `You said: ${JSON.stringify(data)}` }));
-          
+          ws.send(
+            JSON.stringify({
+              type: "message",
+              text: `You said: ${JSON.stringify(data)}`,
+            })
+          );
+
           // Broadcast to all other connected clients
-          clients.forEach(client => {
+          clients.forEach((client) => {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ type: "message", text: `Someone said: ${JSON.stringify(data)}` }));
+              client.send(
+                JSON.stringify({
+                  type: "message",
+                  text: `Someone said: ${JSON.stringify(data)}`,
+                })
+              );
             }
           });
         }
@@ -281,95 +366,125 @@ wss.on("connection", function connection(ws) {
         // --- NEW: Forward file binary data to target client if pending transfer ---
         if (pendingTransfers.has(ws)) {
           const { targetId, metadata } = pendingTransfers.get(ws);
+
+          // Create full file path including subfolders
+          const filePath = path.join(uploadsDir, metadata.path || '', metadata.filename);
           
-          // First save the file to server
-          const filePath = path.join(uploadsDir, metadata.filename);
+          // Ensure subdirectories exist
+          ensureDirectoryExists(filePath);
+
+          // Save the file
           fs.writeFileSync(filePath, message);
-          console.log(`Saved file to server: ${metadata.filename} (${message.length} bytes)`);
-          
+          console.log(`Saved file to server: ${filePath} (${message.length} bytes)`);
+
           // Then forward to target client
-          const target = Array.from(clients).find(c => c.deviceInfo && c.deviceInfo.id === targetId);
+          const target = Array.from(clients).find(
+            (c) => c.deviceInfo && c.deviceInfo.id === targetId
+          );
           if (target) {
             // Send metadata first
-            target.send(JSON.stringify({
-              type: "file_metadata",
-              filename: metadata.filename,
-              size: metadata.size,
-              contentType: metadata.contentType,
-              fromId: ws.deviceInfo.id
-            }));
+            target.send(
+              JSON.stringify({
+                type: "file_metadata",
+                filename: metadata.filename,
+                size: metadata.size,
+                contentType: metadata.contentType,
+                fromId: ws.deviceInfo.id,
+              })
+            );
             // Then send the file data
             target.send(message);
-            
+
             // Acknowledge successful transfer to sender
-            ws.send(JSON.stringify({
-              type: "file_transferred",
-              filename: metadata.filename,
-              stored: true,
-              forwarded: true
-            }));
+            ws.send(
+              JSON.stringify({
+                type: "file_transferred",
+                filename: metadata.filename,
+                stored: true,
+                forwarded: true,
+              })
+            );
           } else {
             // Target client not found, but file still saved on server
-            ws.send(JSON.stringify({
-              type: "file_transferred",
-              filename: metadata.filename,
-              stored: true,
-              forwarded: false,
-              error: "Target client not found or disconnected"
-            }));
+            ws.send(
+              JSON.stringify({
+                type: "file_transferred",
+                filename: metadata.filename,
+                stored: true,
+                forwarded: false,
+                error: "Target client not found or disconnected",
+              })
+            );
           }
           pendingTransfers.delete(ws);
           return;
         }
         // Assume binary data is a file if we have metadata
         if (ws.fileMetadata) {
-          const filePath = path.join(uploadsDir, ws.fileMetadata.filename);
+          const filePath = path.join(uploadsDir, ws.fileMetadata.path || '', ws.fileMetadata.filename);
+          
+          // Ensure subdirectories exist
+          ensureDirectoryExists(filePath);
+          
           fs.writeFileSync(filePath, message);
-          console.log(`Saved file: ${ws.fileMetadata.filename} (${message.length} bytes)`);
-          
+          console.log(`Saved file: ${filePath} (${message.length} bytes)`);
+
           // Acknowledge file receipt
-          ws.send(JSON.stringify({ 
-            type: "file_received", 
-            filename: ws.fileMetadata.filename 
-          }));
-          
+          ws.send(
+            JSON.stringify({
+              type: "file_received",
+              filename: ws.fileMetadata.filename,
+            })
+          );
+
           // Notify other clients about new file
-          clients.forEach(client => {
+          clients.forEach((client) => {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ 
-                type: "file_notification", 
-                filename: ws.fileMetadata.filename,
-                from: ws.deviceName || "another client" 
-              }));
+              client.send(
+                JSON.stringify({
+                  type: "file_notification",
+                  filename: ws.fileMetadata.filename,
+                  from: ws.deviceName || "another client",
+                })
+              );
             }
           });
-          
+
           // Clear the metadata
           ws.fileMetadata = null;
         } else {
           console.log("Received binary data but no file metadata");
-          ws.send(JSON.stringify({ type: "error", message: "Received binary data without metadata" }));
+          ws.send(
+            JSON.stringify({
+              type: "error",
+              message: "Received binary data without metadata",
+            })
+          );
         }
       }
     } catch (error) {
       console.error("Error processing message:", error);
-      ws.send(JSON.stringify({ type: "error", message: "Failed to process message" }));
+      ws.send(
+        JSON.stringify({ type: "error", message: "Failed to process message" })
+      );
     }
   });
 
   ws.on("close", function close() {
     // Remove client from set when they disconnect
     clients.delete(ws);
-    console.log(`Client disconnected: ${ws.deviceName || 'Unknown device'}`);
-    
+    console.log(`Client disconnected: ${ws.deviceName || "Unknown device"}`);
+
     // Broadcast updated list on disconnect
     const clientList = getClientList();
-    clients.forEach(client => {
+    clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({
-          type: "connected_devices",
-          devices: clientList
-        }));
+        client.send(
+          JSON.stringify({
+            type: "connected_devices",
+            devices: clientList,
+          })
+        );
       }
     });
   });
@@ -378,61 +493,74 @@ wss.on("connection", function connection(ws) {
 // Map to store pending file transfers: { ws: { targetId, metadata } }
 const pendingTransfers = new Map();
 
-// Send connected devices to a specific client
+// Helper functions
+function formatFileSize(bytes) {
+  if (bytes === undefined) return 'Unknown size';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
 function sendConnectedDevices(client) {
   if (client.readyState === WebSocket.OPEN) {
-    client.send(JSON.stringify({
-      type: "connected_devices",
-      devices: getClientList()  // Use getClientList instead
-    }));
+    client.send(
+      JSON.stringify({
+        type: "connected_devices",
+        devices: getClientList(), // Use getClientList instead
+      })
+    );
   }
 }
 
-// Broadcast connected devices to all clients
 function broadcastConnectedDevices() {
-  const devicesList = getClientList();  // Use getClientList instead
+  const devicesList = getClientList(); // Use getClientList instead
   console.log(devicesList);
-  
-  clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {  // Add safety check
-      client.send(JSON.stringify({
-        type: "connected_devices",
-        devices: devicesList
-      }));
+
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      // Add safety check
+      client.send(
+        JSON.stringify({
+          type: "connected_devices",
+          devices: devicesList,
+        })
+      );
     }
   });
 }
 
-// Add this function at the bottom of your server.js file
 function displayClientStorageStructure(deviceName, files) {
   // Create an ASCII tree representation of the files
   let tree = `\n📱 ${deviceName}'s Storage:\n`;
-  
+
   // First add folders
-  const folders = files.filter(f => f.isDirectory).sort((a, b) => a.name.localeCompare(b.name));
-  
-  folders.forEach(folder => {
+  const folders = files
+    .filter((f) => f.isDirectory)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  folders.forEach((folder) => {
     tree += `├── 📁 ${folder.name}\n`;
   });
-  
+
   // Then add files (limit to 15 to avoid cluttering the console)
-  const fileList = files.filter(f => !f.isDirectory).sort((a, b) => a.name.localeCompare(b.name));
+  const fileList = files
+    .filter((f) => !f.isDirectory)
+    .sort((a, b) => a.name.localeCompare(b.name));
   const displayFiles = fileList.slice(0, 15);
-  
+
   displayFiles.forEach((file, i) => {
     const isLast = i === displayFiles.length - 1 && i === fileList.length - 1;
-    const prefix = isLast ? '└── ' : '├── ';
+    const prefix = isLast ? "└── " : "├── ";
     tree += `${prefix}📄 ${file.name}\n`;
   });
-  
+
   if (fileList.length > 15) {
     tree += `└── ... ${fileList.length - 15} more files\n`;
   }
-  
+
   console.log(tree);
 }
-
-// Add this after the displayClientStorageStructure function
 
 function handleDirectoryListingResponse(ws, data) {
   // Find the requesting client
@@ -466,21 +594,12 @@ function handleDirectoryListingResponse(ws, data) {
   }
 }
 
-// Add this in the "file_metadata" handling section:
-
-if (data.type === "file_metadata") {
-  console.log(`📎 File metadata received: ${data.filename}`);
-  console.log(`   - Size: ${formatFileSize(data.size)}`);
-  console.log(`   - From: ${ws.deviceName}`);
-  console.log(`   - To: ${data.targetId ? "Client " + data.targetId : "All clients"}`);
-  
-  // ... rest of your existing file_metadata handling
-}
-
-// Add this helper function at the bottom of your file
-function formatFileSize(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+// Add this helper function at the top with other helper functions
+function ensureDirectoryExists(filePath) {
+  const dirname = path.dirname(filePath);
+  if (fs.existsSync(dirname)) {
+    return true;
+  }
+  ensureDirectoryExists(dirname);
+  fs.mkdirSync(dirname);
 }
